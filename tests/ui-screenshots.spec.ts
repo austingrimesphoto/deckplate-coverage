@@ -338,6 +338,12 @@ async function mockAppApi(page: import('@playwright/test').Page) {
       },
     }),
   );
+  await page.route('**/api/admin/locations/*', (route) =>
+    route.fulfill({ json: { deleted: true, locationId: locations[0].id } }),
+  );
+  await page.route('**/api/admin/units/*', (route) =>
+    route.fulfill({ json: { deleted: true, unitId: units[0].id } }),
+  );
   await page.route('**/api/admin/checkins**', (route) =>
     route.fulfill({
       json: {
@@ -726,6 +732,16 @@ test('captures core user and admin screens', async ({ page }, testInfo) => {
   await expect(page.getByRole('status').filter({ hasText: 'Location added: Unsaved map form location.' })).toBeVisible();
   await expect(page.getByLabel('New location name')).toHaveValue('');
   await expect(page.getByLabel('Area for new location')).toHaveValue('');
+  const savedLocation = page.getByLabel(`Location name for ${locations[0].name}`).locator('..');
+  page.once('dialog', (dialog) => dialog.accept());
+  await savedLocation.getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByRole('status').filter({ hasText: `Location deleted: ${locations[0].name}.` })).toBeVisible();
+  await page.getByRole('button', { name: /Commands \(/ }).click();
+  await expect(page.getByRole('heading', { name: /Commands \(/ })).toBeVisible();
+  const savedCommand = page.getByLabel(`Unit name for ${units[0].name}`).locator('..').locator('..');
+  page.once('dialog', (dialog) => dialog.accept());
+  await savedCommand.getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByRole('status').filter({ hasText: `Command deleted: ${units[0].name}.` })).toBeVisible();
   await page.getByRole('button', { name: 'Lock Admin' }).click();
   await expect(page.getByRole('button', { name: 'Unlock' })).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem('deckplate.admin'))).toBeNull();

@@ -37,6 +37,8 @@ import { briefForDate } from './content/deckplateBriefs';
 import { acquireFreshPosition } from './fresh-location-bridge';
 
 type Screen = 'checkin' | 'coverage' | 'map' | 'admin' | 'scoreboard' | 'settings';
+type AdminSetupView = 'queue' | 'locations' | 'commands' | 'areas' | 'team';
+type AdminRecordStatus = 'active' | 'inactive' | 'all';
 
 type AdminData = {
   areas: Area[];
@@ -4402,7 +4404,10 @@ function AdminScreen({
   const [memberForm, setMemberForm] = useState({ name: '', role: '' });
   const [attachUnitIds, setAttachUnitIds] = useState<string[]>([]);
   const [adminSection, setAdminSection] = useState<'setup' | 'activity' | 'settings'>('setup');
+  const [adminSetupView, setAdminSetupView] = useState<AdminSetupView>('locations');
+  const [adminRecordStatus, setAdminRecordStatus] = useState<AdminRecordStatus>('active');
   const [setupSearch, setSetupSearch] = useState('');
+  const [setupVisibleCount, setSetupVisibleCount] = useState(20);
   const [activity, setActivity] = useState<AdminCheckin[]>([]);
   const [activityFilters, setActivityFilters] = useState({
     search: '',
@@ -4687,6 +4692,26 @@ function AdminScreen({
     await patch(`/api/admin/locations/${location.id}`, values);
   }
 
+  async function deleteAdminRecord(kind: 'location' | 'command', id: string, name: string) {
+    const confirmed = window.confirm(
+      kind === 'location'
+        ? `Permanently delete ${name}?\n\nDeletion is only allowed when the location has no assigned commands or check-in history. This cannot be undone.`
+        : `Permanently delete ${name}?\n\nDeletion is only allowed when the command has no check-in history. This cannot be undone.`,
+    );
+    if (!confirmed) return;
+    try {
+      await api(`/api/admin/${kind === 'location' ? 'locations' : 'units'}/${id}`, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${token}` },
+      });
+      setMessage(`${kind === 'location' ? 'Location' : 'Command'} deleted: ${name}.`);
+      refresh();
+      await load();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : `Unable to delete the ${kind}.`);
+    }
+  }
+
   async function resetMemberPin(memberId: string, memberName: string) {
     const confirmed = window.confirm(
       `Reset PIN and revoke devices for ${memberName}?\n\nThis disables that member's existing devices and issues a replacement PIN. Deliver it directly to the member.`,
@@ -4787,10 +4812,12 @@ function AdminScreen({
       if (!data) return [];
       return data.locations.filter((location) => {
         const areaName = data.areas.find((area) => area.id === location.area_id)?.name;
-        return matchesSearch(setupSearch, [location.name, areaName, location.latitude, location.longitude, location.active ? 'active' : 'inactive']);
+        const statusMatches =
+          adminRecordStatus === 'all' || (adminRecordStatus === 'active' ? location.active : !location.active);
+        return statusMatches && matchesSearch(setupSearch, [location.name, areaName, location.latitude, location.longitude, location.active ? 'active' : 'inactive']);
       });
     },
-    [data, setupSearch],
+    [adminRecordStatus, data, setupSearch],
   );
   const filteredAdminUnits = useMemo(
     () => {
@@ -4798,7 +4825,8 @@ function AdminScreen({
       return data.units.filter((unit) => {
         const location = data.locations.find((candidate) => candidate.id === unit.location_id);
         const areaName = data.areas.find((area) => area.id === location?.area_id)?.name;
-        return matchesSearch(setupSearch, [
+        const statusMatches = adminRecordStatus === 'all' || (adminRecordStatus === 'active' ? unit.active : !unit.active);
+        return statusMatches && matchesSearch(setupSearch, [
           unit.name,
           unitTypeLabel[unit.unit_type],
           location?.name,
@@ -4808,13 +4836,33 @@ function AdminScreen({
         ]);
       });
     },
-    [data, setupSearch],
+    [adminRecordStatus, data, setupSearch],
   );
   const filteredAdminTeamMembers = useMemo(
-    () => data?.teamMembers.filter((member) => matchesSearch(setupSearch, [member.name, member.role, member.active ? 'active' : 'inactive'])) ?? [],
-    [data?.teamMembers, setupSearch],
+    () =>
+      data?.teamMembers.filter((member) => {
+        const statusMatches = adminRecordStatus === 'all' || (adminRecordStatus === 'active' ? member.active : !member.active);
+        return statusMatches && matchesSearch(setupSearch, [member.name, member.role, member.active ? 'active' : 'inactive']);
+      }) ?? [],
+    [adminRecordStatus, data?.teamMembers, setupSearch],
   );
-  const unmappedAdminUnits = useMemo(() => data?.units.filter((unit) => !unit.location_id) ?? [], [data?.units]);
+  const unmappedAdminUnits = useMemo(
+    () =>
+      data?.units.filter(
+        (unit) => !unit.location_id && matchesSearch(setupSearch, [unit.name, unitTypeLabel[unit.unit_type], unit.active ? 'active' : 'inactive']),
+      ) ?? [],
+    [data?.units, setupSearch],
+  );
+  const currentSetupRecordCount =
+    adminSetupView === 'locations'
+      ? filteredAdminLocations.length
+      : adminSetupView === 'commands'
+        ? filteredAdminUnits.length
+        : adminSetupView === 'areas'
+          ? filteredAdminAreas.length
+          : adminSetupView === 'team'
+            ? filteredAdminTeamMembers.length
+            : unmappedAdminUnits.length;
 
   useEffect(() => {
     if (token && adminSection === 'activity') void loadActivity();
@@ -5022,15 +5070,56 @@ function AdminScreen({
           {showOnboardingChecklist && (
             <OnboardingChecklist onboarding={onboardingSummary} onComplete={dismissOnboardingChecklist} />
           )}
+          <nav className="setup-nav" aria-label="Mapping management sections">
+            {([
+              ['locations', `Locations (${data?.locations.length ?? 0})`],
+              ['commands', `Commands (${data?.units.length ?? 0})`],
+              ['queue', `Unmapped (${data?.units.filter((unit) => !unit.location_id).length ?? 0})`],
+              ['areas', `Areas (${data?.areas.length ?? 0})`],
+              ['team', `Team (${data?.teamMembers.length ?? 0})`],
+            ] as Array<[AdminSetupView, string]>).map(([view, label]) => (
+              <button
+                key={view}
+                type="button"
+                className={adminSetupView === view ? 'active' : ''}
+                aria-current={adminSetupView === view ? 'page' : undefined}
+                onClick={() => {
+                  setAdminSetupView(view);
+                  setSetupSearch('');
+                  setAdminRecordStatus('active');
+                  setSetupVisibleCount(20);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
           <section className="filters">
             <input
               aria-label="Search admin setup records"
-              placeholder="Search saved areas, locations, commands, or team members"
+              placeholder={`Search ${adminSetupView === 'queue' ? 'unmapped commands' : adminSetupView}`}
               value={setupSearch}
-              onChange={(event) => setSetupSearch(event.target.value)}
+              onChange={(event) => {
+                setSetupSearch(event.target.value);
+                setSetupVisibleCount(20);
+              }}
             />
+            {(['locations', 'commands', 'team'] as AdminSetupView[]).includes(adminSetupView) && (
+              <select
+                aria-label="Filter records by status"
+                value={adminRecordStatus}
+                onChange={(event) => {
+                  setAdminRecordStatus(event.target.value as AdminRecordStatus);
+                  setSetupVisibleCount(20);
+                }}
+              >
+                <option value="active">Active only</option>
+                <option value="inactive">Inactive only</option>
+                <option value="all">All statuses</option>
+              </select>
+            )}
           </section>
-          <section className="panel">
+          {adminSetupView === 'areas' && <section className="panel">
             <h2>Create area</h2>
             <p className="muted">Use broad, non-sensitive area names. Do not enter restricted room names, deployed locations, or sensitive operational details.</p>
             <form onSubmit={createArea} className="stack">
@@ -5044,9 +5133,9 @@ function AdminScreen({
               />
               <button className="primary">Save area</button>
             </form>
-          </section>
+          </section>}
 
-          <section className="panel">
+          {adminSetupView === 'locations' && <section className="panel">
             <h2>Create location</h2>
             <p className="warning-notice">{locationMappingNotice}</p>
             <form onSubmit={createLocation} className="stack">
@@ -5122,7 +5211,7 @@ function AdminScreen({
                 Review location
               </button>
             </form>
-          </section>
+          </section>}
 
           {pendingLocation && (
             <div className="location-confirmation-overlay" role="dialog" aria-modal="true" aria-labelledby="location-confirmation-title">
@@ -5173,12 +5262,12 @@ function AdminScreen({
             </div>
           )}
 
-          <section className="panel">
+          {adminSetupView === 'queue' && <section className="panel">
             <p className="eyebrow">Location assignment queue</p>
             <h2>Unmapped commands ({unmappedAdminUnits.length})</h2>
             <p className="muted">Assign each command to an existing mapped location. Commands leave this queue as soon as you choose a location.</p>
             <div className="unmapped-location-queue">
-              {unmappedAdminUnits.map((unit) => (
+              {unmappedAdminUnits.slice(0, setupVisibleCount).map((unit) => (
                 <article key={unit.id} className="admin-row">
                   <div>
                     <strong>{unit.name}</strong>
@@ -5205,11 +5294,16 @@ function AdminScreen({
                 </article>
               ))}
               {!unmappedAdminUnits.length && <p className="notice">Every command has a mapped location.</p>}
+              {unmappedAdminUnits.length > setupVisibleCount && (
+                <button className="secondary" type="button" onClick={() => setSetupVisibleCount((count) => count + 20)}>
+                  Show 20 more
+                </button>
+              )}
             </div>
-          </section>
+          </section>}
 
-          <section className="panel">
-            <h2>Create unit</h2>
+          {adminSetupView === 'commands' && <section className="panel">
+            <h2>Create command</h2>
             <p className="muted">Do not enter sensitive mission details. Use ordinary department, division, or tenant-command labels only when they are not sensitive.</p>
             <form onSubmit={createUnit} className="stack">
               <input aria-label="New unit name" placeholder="Unit name" value={unitForm.name} onChange={(event) => setUnitForm({ ...unitForm, name: event.target.value })} required />
@@ -5227,11 +5321,11 @@ function AdminScreen({
                 ))}
               </select>
               <input aria-label="Visit interval in days" type="number" min="1" max="3650" inputMode="numeric" value={unitForm.visit_interval_days} onChange={(event) => setUnitForm({ ...unitForm, visit_interval_days: event.target.value })} required />
-              <button className="primary">Save unit</button>
+              <button className="primary">Save command</button>
             </form>
-          </section>
+          </section>}
 
-          <section className="panel">
+          {adminSetupView === 'team' && <section className="panel">
             <h2>Create team member</h2>
             <p className="muted">
               Create the roster entry, send the workspace link, and deliver any initial PIN directly to the member. On local development
@@ -5245,10 +5339,27 @@ function AdminScreen({
               <input aria-label="New team member role" placeholder="Role" value={memberForm.role} onChange={(event) => setMemberForm({ ...memberForm, role: event.target.value })} />
               <button className="primary">Save member</button>
             </form>
-          </section>
+          </section>}
 
-          <section className="coverage-list">
-            {filteredAdminAreas.map((area) => (
+          {adminSetupView !== 'queue' && <section className="panel">
+            <div className="admin-list-heading">
+              <div>
+                <p className="eyebrow">Saved records</p>
+                <h2>
+                  {adminSetupView === 'locations'
+                    ? 'Locations'
+                    : adminSetupView === 'commands'
+                      ? 'Commands'
+                      : adminSetupView === 'areas'
+                        ? 'Areas'
+                        : 'Team members'}{' '}
+                  ({currentSetupRecordCount})
+                </h2>
+              </div>
+              <small>Showing {Math.min(setupVisibleCount, currentSetupRecordCount)} of {currentSetupRecordCount}</small>
+            </div>
+            <div className="coverage-list">
+            {adminSetupView === 'areas' && filteredAdminAreas.slice(0, setupVisibleCount).map((area) => (
               <article key={area.id} className="admin-row">
                 <input
                   aria-label={`Area name for ${area.name}`}
@@ -5268,7 +5379,7 @@ function AdminScreen({
                 />
               </article>
             ))}
-            {filteredAdminLocations.map((location) => (
+            {adminSetupView === 'locations' && filteredAdminLocations.slice(0, setupVisibleCount).map((location) => (
               <article key={location.id} className="admin-row">
                 <input
                   aria-label={`Location name for ${location.name}`}
@@ -5297,12 +5408,17 @@ function AdminScreen({
                     />
                   </label>
                 </div>
-                <button className="secondary" onClick={() => patchLocation(location, { active: !location.active })}>
-                  {location.active ? 'Deactivate' : 'Activate'}
-                </button>
+                <div className="admin-row-actions">
+                  <button className="secondary" onClick={() => patchLocation(location, { active: !location.active })}>
+                    {location.active ? 'Deactivate' : 'Activate'}
+                  </button>
+                  <button className="secondary danger-text" onClick={() => void deleteAdminRecord('location', location.id, location.name)}>
+                    Delete
+                  </button>
+                </div>
               </article>
             ))}
-            {filteredAdminUnits.map((unit) => (
+            {adminSetupView === 'commands' && filteredAdminUnits.slice(0, setupVisibleCount).map((unit) => (
               <article key={unit.id} className="admin-row">
                 <div>
                   <input
@@ -5332,12 +5448,17 @@ function AdminScreen({
                     </option>
                   ))}
                 </select>
-                <button className="secondary" onClick={() => patch(`/api/admin/units/${unit.id}`, { active: !unit.active })}>
-                  {unit.active ? 'Deactivate' : 'Activate'}
-                </button>
+                <div className="admin-row-actions">
+                  <button className="secondary" onClick={() => patch(`/api/admin/units/${unit.id}`, { active: !unit.active })}>
+                    {unit.active ? 'Deactivate' : 'Activate'}
+                  </button>
+                  <button className="secondary danger-text" onClick={() => void deleteAdminRecord('command', unit.id, unit.name)}>
+                    Delete
+                  </button>
+                </div>
               </article>
             ))}
-            {filteredAdminTeamMembers.map((member) => (
+            {adminSetupView === 'team' && filteredAdminTeamMembers.slice(0, setupVisibleCount).map((member) => (
               <article key={member.id} className="admin-row">
                 <div className="stack">
                   <input
@@ -5366,12 +5487,14 @@ function AdminScreen({
                 </div>
               </article>
             ))}
-            {data &&
-              !filteredAdminAreas.length &&
-              !filteredAdminLocations.length &&
-              !filteredAdminUnits.length &&
-              !filteredAdminTeamMembers.length && <p className="notice">No setup records match that search.</p>}
-          </section>
+            {!currentSetupRecordCount && <p className="notice">No {adminSetupView} match the current filters.</p>}
+            {currentSetupRecordCount > setupVisibleCount && (
+              <button className="secondary" type="button" onClick={() => setSetupVisibleCount((count) => count + 20)}>
+                Show 20 more
+              </button>
+            )}
+            </div>
+          </section>}
         </>
       )}
     </main>

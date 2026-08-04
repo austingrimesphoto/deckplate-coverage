@@ -3888,6 +3888,23 @@ async function route(event: HandlerEvent) {
     return json(200, { location: data });
   }
 
+  if (method === 'DELETE' && locationMatch) {
+    const organizationId = adminContext!.organizationId;
+    if (!isUuid(locationMatch[1])) return json(400, { error: 'Location ID must be a UUID.' });
+    const locationDelete = supabase.from('locations').delete().eq('id', locationMatch[1]);
+    const { data, error } = await scoped(locationDelete, organizationId).select('id').maybeSingle();
+    if (error) {
+      if (error.code === '23503') {
+        return json(409, {
+          error: 'This location is still assigned to a command or retained in check-in history. Reassign its commands and deactivate it instead.',
+        });
+      }
+      throw error;
+    }
+    if (!data) return json(404, { error: 'Location not found.' });
+    return json(200, { deleted: true, locationId: data.id });
+  }
+
   if (method === 'POST' && path === '/admin/units') {
     const organizationId = adminContext!.organizationId;
     const values = normalizeUnitMutation(readBody<Record<string, unknown>>(event), true);
@@ -3918,6 +3935,21 @@ async function route(event: HandlerEvent) {
     if (error) throw error;
     if (!data) return json(404, { error: 'Unit not found.' });
     return json(200, { unit: data });
+  }
+
+  if (method === 'DELETE' && unitMatch) {
+    const organizationId = adminContext!.organizationId;
+    if (!isUuid(unitMatch[1])) return json(400, { error: 'Unit ID must be a UUID.' });
+    const unitDelete = supabase.from('units').delete().eq('id', unitMatch[1]);
+    const { data, error } = await scoped(unitDelete, organizationId).select('id').maybeSingle();
+    if (error) {
+      if (error.code === '23503') {
+        return json(409, { error: 'This command is retained in check-in history and cannot be deleted. Deactivate it instead.' });
+      }
+      throw error;
+    }
+    if (!data) return json(404, { error: 'Unit not found.' });
+    return json(200, { deleted: true, unitId: data.id });
   }
 
   if (method === 'POST' && path === '/admin/team-members') {

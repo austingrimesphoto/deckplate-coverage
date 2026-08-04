@@ -527,6 +527,27 @@ small,
   color: #fff;
 }
 
+.setup-nav {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.setup-nav button {
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--brand);
+}
+
+.setup-nav button.active {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: #fff;
+}
+
 .unit-picker,
 .coverage-list {
   display: grid;
@@ -833,6 +854,29 @@ small,
   display: grid;
   grid-template-columns: 1fr;
   align-items: stretch;
+}
+
+.admin-row-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-list-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.admin-list-heading h2,
+.admin-list-heading p {
+  margin-bottom: 0;
+}
+
+.admin-list-heading > small {
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 .activity-row {
