@@ -192,6 +192,15 @@ check('Admin location plus unit assignment is one tenant-scoped locked transacti
 check('Admin roster profile/status changes and device revocation are one transaction', has(adminMembers, "supabase.rpc('admin_update_team_member'") && has(files.migration014, 'create or replace function admin_update_team_member') && has(files.migration014, 'update public.devices'));
 check('Admin unit mutations validate referenced locations inside organization', has(adminUnits, 'validateUnitReferences') && has(adminUnits, 'scoped(unitUpdate, organizationId)'));
 check(
+  'Admin location and command deletes stay workspace scoped and preserve referenced history',
+  has(adminLocations, "if (method === 'DELETE' && locationMatch)") &&
+    has(adminLocations, 'scoped(locationDelete, organizationId)') &&
+    has(adminLocations, "error.code === '23503'") &&
+    has(adminUnits, "if (method === 'DELETE' && unitMatch)") &&
+    has(adminUnits, 'scoped(unitDelete, organizationId)') &&
+    has(adminUnits, "error.code === '23503'"),
+);
+check(
   'Operator routes require central operator token and omit stored hashes',
   has(api, "path.startsWith('/operator/')") &&
     has(api, 'await requireOperator(event)') &&
