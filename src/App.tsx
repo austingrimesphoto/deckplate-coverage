@@ -45,6 +45,19 @@ type AdminData = {
   teamMembers: Array<{ id: string; name: string; role: string | null; active: boolean }>;
 };
 
+type LocationForm = {
+  name: string;
+  area_id: string;
+  latitude: string;
+  longitude: string;
+  radius_meters: string;
+};
+
+type PendingLocation = {
+  form: LocationForm;
+  unitIds: string[];
+};
+
 type OnboardingSummary = {
   areaCount: number;
   locationCount: number;
@@ -581,7 +594,6 @@ const missionBriefMessages: Record<GamificationTone, Record<MissionBriefContext,
   },
 };
 
-const missionBriefDateKey = 'deckplate.missionBrief.lastExpandedDate';
 const badgeCelebrationsKey = 'deckplate.badgeCelebrations';
 const currentReleaseNote = {
   id: '2026-07-08-quality-controls-winners',
@@ -2084,7 +2096,6 @@ function CheckInScreen({
   const [locating, setLocating] = useState(false);
   const cancelLocationRequest = useRef<(() => void) | null>(null);
   const locationRequestId = useRef(0);
-  const brief = useMemo(() => briefForDate(identity.teamMemberId), [identity.teamMemberId]);
   const locationSummaries = useMemo(() => getCachedLocationSummaries(bootstrap.units), [bootstrap.units]);
   const unmappedUnits = bootstrap.units.filter((unit) => !unit.location_id);
 
@@ -2570,6 +2581,7 @@ function CheckInScreen({
           <p className="admin-hint">Admin-only Create Location is available on the Admin tab.</p>
         </section>
       )}
+      <CheckinMissionBrief teamMemberId={identity.teamMemberId} />
       {confirmation && (
         <section className="panel confirmation-panel">
           <p className="eyebrow">{confirmation.syncStatus === 'queued' ? 'Saved on this device' : 'Check-in saved'}</p>
@@ -2642,13 +2654,6 @@ function CheckInScreen({
               </label>
             </section>
           )}
-          <section className="brief-card">
-            <p className="eyebrow">Deckplate Brief</p>
-            <p>{brief.text}</p>
-            <small>
-              {brief.attribution} - {brief.sourceTitle}
-            </small>
-          </section>
           <div className="action-row">
             <button className="secondary danger-text" onClick={undoCheckin} disabled={loading}>
               Undo this check-in
@@ -2669,6 +2674,47 @@ function CheckInScreen({
       )}
       {message && <p className="notice">{message}</p>}
     </main>
+  );
+}
+
+function CheckinMissionBrief({ teamMemberId }: { teamMemberId: string }) {
+  const [now, setNow] = useState(() => new Date());
+  const today = localDateKey(now);
+  const dismissalKey = `deckplate.checkinBrief.dismissed.${teamMemberId}.${today}`;
+  const [dismissed, setDismissed] = useState(() => readLocalValue(dismissalKey) === 'true');
+  const brief = useMemo(() => briefForDate(teamMemberId, now), [now, teamMemberId]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    setDismissed(readLocalValue(dismissalKey) === 'true');
+  }, [dismissalKey]);
+
+  if (dismissed) return null;
+
+  return (
+    <section className="brief-card checkin-brief" aria-labelledby="checkin-brief-title">
+      <div>
+        <p className="eyebrow" id="checkin-brief-title">Deckplate Brief</p>
+        <p>{brief.text}</p>
+        <small>
+          {brief.attribution} - {brief.sourceTitle}
+        </small>
+      </div>
+      <button
+        className="secondary"
+        type="button"
+        onClick={() => {
+          writeLocalValue(dismissalKey, 'true');
+          setDismissed(true);
+        }}
+      >
+        Dismiss
+      </button>
+    </section>
   );
 }
 
@@ -2717,59 +2763,6 @@ function SyncStatusBar({
         </button>
       )}
     </div>
-  );
-}
-
-function MissionBrief({
-  units,
-  tone,
-  recentRecovery,
-}: {
-  units: UnitSummary[];
-  tone: GamificationTone;
-  recentRecovery: boolean;
-}) {
-  const today = localDateKey();
-  const [expanded, setExpanded] = useState(() => readLocalValue(missionBriefDateKey) !== today);
-  const context = missionContextFromUnits(units, recentRecovery);
-  const counts = useMemo(
-    () => ({
-      gray: units.filter((unit) => unit.status === 'gray').length,
-      red: units.filter((unit) => unit.status === 'red').length,
-      yellow: units.filter((unit) => unit.status === 'yellow').length,
-    }),
-    [units],
-  );
-  const message = useMemo(
-    () => missionNudge(tone, context, `${today}:${context}:${counts.gray}:${counts.red}:${counts.yellow}`),
-    [context, counts.gray, counts.red, counts.yellow, today, tone],
-  );
-
-  useEffect(() => {
-    if (!expanded) return;
-    writeLocalValue(missionBriefDateKey, today);
-    const timeout = window.setTimeout(() => setExpanded(false), 9000);
-    return () => window.clearTimeout(timeout);
-  }, [expanded, today]);
-
-  return (
-    <section className={`mission-brief ${expanded ? 'expanded' : 'collapsed'}`}>
-      {expanded ? (
-        <>
-          <div>
-            <p className="eyebrow">Mission Brief</p>
-            <p>{message}</p>
-          </div>
-          <button className="secondary" onClick={() => setExpanded(false)} aria-label="Collapse Mission Brief">
-            Close
-          </button>
-        </>
-      ) : (
-        <button className="mission-brief-pill" onClick={() => setExpanded(true)}>
-          Mission Brief
-        </button>
-      )}
-    </section>
   );
 }
 
@@ -4396,13 +4389,15 @@ function AdminScreen({
   const [data, setData] = useState<AdminData | null>(null);
   const [message, setMessage] = useState('');
   const [areaForm, setAreaForm] = useState({ name: '', sort_order: '0' });
-  const [locationForm, setLocationForm] = useState({
+  const [locationForm, setLocationForm] = useState<LocationForm>({
     name: '',
     area_id: '',
     latitude: String(mapDefaultLatitude),
     longitude: String(mapDefaultLongitude),
     radius_meters: '120',
   });
+  const [pendingLocation, setPendingLocation] = useState<PendingLocation | null>(null);
+  const [savingLocation, setSavingLocation] = useState(false);
   const [unitForm, setUnitForm] = useState({ name: '', unit_type: 'department' as UnitType, visit_interval_days: '30', location_id: '' });
   const [memberForm, setMemberForm] = useState({ name: '', role: '' });
   const [attachUnitIds, setAttachUnitIds] = useState<string[]>([]);
@@ -4490,7 +4485,6 @@ function AdminScreen({
       setOnboardingSummary(settings.onboarding ?? null);
       const checklistDismissed = readLocalValue(onboardingChecklistStorageKey) === 'dismissed';
       setShowOnboardingChecklist(Boolean(settings.onboarding && !settings.onboarding.readyForCheckins && !checklistDismissed));
-      setLocationForm((current) => ({ ...current, area_id: result.areas[0]?.id ?? current.area_id }));
       setActingTeamMemberId((current) => current || result.teamMembers[0]?.id || '');
     } catch (err) {
       const status = err instanceof Error ? (err as Error & { status?: number }).status : undefined;
@@ -4568,26 +4562,42 @@ function AdminScreen({
       setMessage(validationError);
       return;
     }
+    setPendingLocation({ form: { ...locationForm }, unitIds: [...attachUnitIds] });
+  }
+
+  async function confirmCreateLocation() {
+    if (!pendingLocation) return;
+    const { form, unitIds } = pendingLocation;
+    setSavingLocation(true);
     try {
       await api('/api/admin/locations', {
         method: 'POST',
         headers: { authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          ...locationForm,
-          latitude,
-          longitude,
-          radius_meters: radiusMeters,
+          ...form,
+          latitude: numberFromInput(form.latitude),
+          longitude: numberFromInput(form.longitude),
+          radius_meters: numberFromInput(form.radius_meters),
           active: true,
-          unitIds: attachUnitIds,
+          unitIds,
         }),
       });
-      setMessage('Location saved.');
-      setLocationForm((current) => ({ ...current, name: '' }));
+      setMessage(`Location added: ${form.name}.`);
+      setLocationForm({
+        name: '',
+        area_id: '',
+        latitude: String(mapDefaultLatitude),
+        longitude: String(mapDefaultLongitude),
+        radius_meters: '120',
+      });
       setAttachUnitIds([]);
+      setPendingLocation(null);
       refresh();
       await load();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Unable to save the location.');
+    } finally {
+      setSavingLocation(false);
     }
   }
 
@@ -4804,6 +4814,7 @@ function AdminScreen({
     () => data?.teamMembers.filter((member) => matchesSearch(setupSearch, [member.name, member.role, member.active ? 'active' : 'inactive'])) ?? [],
     [data?.teamMembers, setupSearch],
   );
+  const unmappedAdminUnits = useMemo(() => data?.units.filter((unit) => !unit.location_id) ?? [], [data?.units]);
 
   useEffect(() => {
     if (token && adminSection === 'activity') void loadActivity();
@@ -5040,6 +5051,7 @@ function AdminScreen({
             <p className="warning-notice">{locationMappingNotice}</p>
             <form onSubmit={createLocation} className="stack">
               <select aria-label="Area for new location" value={locationForm.area_id} onChange={(event) => setLocationForm({ ...locationForm, area_id: event.target.value })} required>
+                <option value="">Choose an area</option>
                 {data?.areas.map((area) => (
                   <option key={area.id} value={area.id}>
                     {area.name}
@@ -5107,9 +5119,93 @@ function AdminScreen({
                 </select>
               </label>
               <button className="primary" disabled={!data?.areas.length}>
-                Save location
+                Review location
               </button>
             </form>
+          </section>
+
+          {pendingLocation && (
+            <div className="location-confirmation-overlay" role="dialog" aria-modal="true" aria-labelledby="location-confirmation-title">
+              <section className="panel location-confirmation-panel">
+                <p className="eyebrow">Location preview</p>
+                <h2 id="location-confirmation-title">Add this location?</h2>
+                <p className="muted">Review the details below. Select OK to add it to the map, or Cancel to return to the form without saving.</p>
+                <dl className="confirmation-details">
+                  <div>
+                    <dt>Name</dt>
+                    <dd>{pendingLocation.form.name}</dd>
+                  </div>
+                  <div>
+                    <dt>Area</dt>
+                    <dd>{data?.areas.find((area) => area.id === pendingLocation.form.area_id)?.name ?? 'Unassigned'}</dd>
+                  </div>
+                  <div>
+                    <dt>Map point</dt>
+                    <dd>
+                      {Number(pendingLocation.form.latitude).toFixed(6)}, {Number(pendingLocation.form.longitude).toFixed(6)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Radius</dt>
+                    <dd>{pendingLocation.form.radius_meters}m</dd>
+                  </div>
+                  <div>
+                    <dt>Attached commands</dt>
+                    <dd>
+                      {pendingLocation.unitIds.length
+                        ? pendingLocation.unitIds
+                            .map((unitId) => data?.units.find((unit) => unit.id === unitId)?.name)
+                            .filter((name): name is string => Boolean(name))
+                            .join(', ')
+                        : 'None'}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="action-row">
+                  <button className="secondary" type="button" onClick={() => setPendingLocation(null)} disabled={savingLocation}>
+                    Cancel
+                  </button>
+                  <button className="primary" type="button" onClick={() => void confirmCreateLocation()} disabled={savingLocation}>
+                    {savingLocation ? 'Adding...' : 'OK, add location'}
+                  </button>
+                </div>
+              </section>
+            </div>
+          )}
+
+          <section className="panel">
+            <p className="eyebrow">Location assignment queue</p>
+            <h2>Unmapped commands ({unmappedAdminUnits.length})</h2>
+            <p className="muted">Assign each command to an existing mapped location. Commands leave this queue as soon as you choose a location.</p>
+            <div className="unmapped-location-queue">
+              {unmappedAdminUnits.map((unit) => (
+                <article key={unit.id} className="admin-row">
+                  <div>
+                    <strong>{unit.name}</strong>
+                    <small>
+                      {unitTypeLabel[unit.unit_type]} · every {unit.visit_interval_days} days{unit.active ? '' : ' · inactive'}
+                    </small>
+                  </div>
+                  <select
+                    aria-label={`Assign location for ${unit.name}`}
+                    defaultValue=""
+                    onChange={(event) => {
+                      if (event.target.value) void patch(`/api/admin/units/${unit.id}`, { location_id: event.target.value });
+                    }}
+                  >
+                    <option value="">Assign to mapped location</option>
+                    {data?.locations
+                      .filter((location) => location.active)
+                      .map((location) => (
+                        <option key={location.id} value={location.id}>
+                          {location.name}
+                        </option>
+                      ))}
+                  </select>
+                </article>
+              ))}
+              {!unmappedAdminUnits.length && <p className="notice">Every command has a mapped location.</p>}
+            </div>
           </section>
 
           <section className="panel">
@@ -6119,6 +6215,26 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const viewport = window.visualViewport;
+    const updateBottomInset = () => {
+      const visualHeight = viewport?.height ?? window.innerHeight;
+      const visualOffsetTop = viewport?.offsetTop ?? 0;
+      const bottomInset = Math.max(0, window.innerHeight - visualHeight - visualOffsetTop);
+      document.documentElement.style.setProperty('--app-viewport-bottom', `${bottomInset}px`);
+    };
+    updateBottomInset();
+    window.addEventListener('resize', updateBottomInset);
+    viewport?.addEventListener('resize', updateBottomInset);
+    viewport?.addEventListener('scroll', updateBottomInset);
+    return () => {
+      window.removeEventListener('resize', updateBottomInset);
+      viewport?.removeEventListener('resize', updateBottomInset);
+      viewport?.removeEventListener('scroll', updateBottomInset);
+      document.documentElement.style.removeProperty('--app-viewport-bottom');
+    };
+  }, []);
+
+  useEffect(() => {
     if (!identity) return;
     const sync = () => void syncPending(identity);
     const handleVisibilityChange = () => {
@@ -6336,9 +6452,6 @@ export default function App() {
             ))}
           </div>
         </section>
-      )}
-      {syncState !== 'auth' && (
-        <MissionBrief units={bootstrap.units} tone={bootstrap.gamificationTone ?? 'professional'} recentRecovery={false} />
       )}
       {syncState === 'auth' && (
         <form className="pin-refresh" onSubmit={refreshSession}>
