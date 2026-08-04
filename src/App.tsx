@@ -5381,30 +5381,72 @@ function AdminScreen({
             ))}
             {adminSetupView === 'locations' && filteredAdminLocations.slice(0, setupVisibleCount).map((location) => (
               <article key={location.id} className="admin-row">
-                <input
-                  aria-label={`Location name for ${location.name}`}
-                  defaultValue={location.name}
-                  onBlur={(event) => {
-                    if (event.target.value.trim() !== location.name) void patchLocation(location, { name: event.target.value });
-                  }}
-                />
-                <div className="grid-two">
+                <div className="stack">
                   <label>
-                    Latitude
+                    Location name
                     <input
-                      inputMode="decimal"
-                      placeholder="24.570000"
-                      defaultValue={location.latitude}
-                      onBlur={(event) => patchLocation(location, { latitude: numberFromInput(event.target.value) })}
+                      aria-label={`Location name for ${location.name}`}
+                      defaultValue={location.name}
+                      onBlur={(event) => {
+                        if (event.target.value.trim() !== location.name) void patchLocation(location, { name: event.target.value });
+                      }}
                     />
                   </label>
                   <label>
-                    Longitude
+                    Area
+                    <select
+                      aria-label={`Area assignment for ${location.name}`}
+                      value={location.area_id}
+                      onChange={(event) => void patchLocation(location, { area_id: event.target.value })}
+                    >
+                      {data?.areas.map((area) => (
+                        <option key={area.id} value={area.id}>
+                          {area.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="stack">
+                  <div className="grid-two">
+                    <label>
+                      Latitude
+                      <input
+                        inputMode="decimal"
+                        placeholder="24.570000"
+                        defaultValue={location.latitude}
+                        onBlur={(event) => {
+                          const value = numberFromInput(event.target.value);
+                          if (value !== location.latitude) void patchLocation(location, { latitude: value });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Longitude
+                      <input
+                        inputMode="decimal"
+                        placeholder="-81.780000"
+                        defaultValue={location.longitude}
+                        onBlur={(event) => {
+                          const value = numberFromInput(event.target.value);
+                          if (value !== location.longitude) void patchLocation(location, { longitude: value });
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <label>
+                    Check-in radius (meters)
                     <input
-                      inputMode="decimal"
-                      placeholder="-81.780000"
-                      defaultValue={location.longitude}
-                      onBlur={(event) => patchLocation(location, { longitude: numberFromInput(event.target.value) })}
+                      aria-label={`Check-in radius in meters for ${location.name}`}
+                      type="number"
+                      min={minLocationRadiusMeters}
+                      max={maxLocationRadiusMeters}
+                      inputMode="numeric"
+                      defaultValue={location.radius_meters}
+                      onBlur={(event) => {
+                        const value = numberFromInput(event.target.value);
+                        if (value !== location.radius_meters) void patchLocation(location, { radius_meters: value });
+                      }}
                     />
                   </label>
                 </div>
@@ -5420,34 +5462,65 @@ function AdminScreen({
             ))}
             {adminSetupView === 'commands' && filteredAdminUnits.slice(0, setupVisibleCount).map((unit) => (
               <article key={unit.id} className="admin-row">
-                <div>
-                  <input
-                    aria-label={`Unit name for ${unit.name}`}
-                    defaultValue={unit.name}
-                    onBlur={(event) => {
-                      if (event.target.value.trim() !== unit.name) void patch(`/api/admin/units/${unit.id}`, { name: event.target.value });
-                    }}
-                  />
-                  <input
-                    aria-label={`Visit interval in days for ${unit.name}`}
-                    inputMode="numeric"
-                    defaultValue={unit.visit_interval_days}
-                    onBlur={(event) => {
-                      const value = Number(event.target.value);
-                      if (Number.isFinite(value) && value > 0 && value !== unit.visit_interval_days) {
-                        void patch(`/api/admin/units/${unit.id}`, { visit_interval_days: value });
-                      }
-                    }}
-                  />
+                <div className="stack">
+                  <label>
+                    Command name
+                    <input
+                      aria-label={`Unit name for ${unit.name}`}
+                      defaultValue={unit.name}
+                      onBlur={(event) => {
+                        if (event.target.value.trim() !== unit.name) void patch(`/api/admin/units/${unit.id}`, { name: event.target.value });
+                      }}
+                    />
+                  </label>
+                  <div className="grid-two">
+                    <label>
+                      Command type
+                      <select
+                        aria-label={`Command type for ${unit.name}`}
+                        value={unit.unit_type}
+                        onChange={(event) => void patch(`/api/admin/units/${unit.id}`, { unit_type: event.target.value })}
+                      >
+                        {(Object.keys(unitTypeLabel) as UnitType[]).map((unitType) => (
+                          <option key={unitType} value={unitType}>
+                            {unitTypeLabel[unitType]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Visit interval (days)
+                      <input
+                        aria-label={`Visit interval in days for ${unit.name}`}
+                        type="number"
+                        min="1"
+                        max="3650"
+                        inputMode="numeric"
+                        defaultValue={unit.visit_interval_days}
+                        onBlur={(event) => {
+                          const value = Number(event.target.value);
+                          if (Number.isFinite(value) && value > 0 && value !== unit.visit_interval_days) {
+                            void patch(`/api/admin/units/${unit.id}`, { visit_interval_days: value });
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
                 </div>
-                <select aria-label={`Location assignment for ${unit.name}`} value={unit.location_id ?? ''} onChange={(event) => void patch(`/api/admin/units/${unit.id}`, { location_id: event.target.value || null })}>
-                  <option value="">Unassigned</option>
-                  {data?.locations.map((location) => (
-                    <option key={location.id} value={location.id}>
-                      {location.name}
-                    </option>
-                  ))}
-                </select>
+                <label>
+                  Assigned location and area
+                  <select aria-label={`Location assignment for ${unit.name}`} value={unit.location_id ?? ''} onChange={(event) => void patch(`/api/admin/units/${unit.id}`, { location_id: event.target.value || null })}>
+                    <option value="">Unassigned</option>
+                    {data?.locations.map((location) => {
+                      const areaName = data.areas.find((area) => area.id === location.area_id)?.name;
+                      return (
+                        <option key={location.id} value={location.id}>
+                          {location.name}{areaName ? ` — ${areaName}` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </label>
                 <div className="admin-row-actions">
                   <button className="secondary" onClick={() => patch(`/api/admin/units/${unit.id}`, { active: !unit.active })}>
                     {unit.active ? 'Deactivate' : 'Activate'}

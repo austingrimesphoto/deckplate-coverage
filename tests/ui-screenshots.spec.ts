@@ -47,7 +47,10 @@ const teamMembers = [
   { id: '22222222-2222-4222-8222-222222222222', name: 'RP Smith', role: 'Religious Program Specialist' },
 ];
 
-const areas = [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Waterfront', sort_order: 1 }];
+const areas = [
+  { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Waterfront', sort_order: 1 },
+  { id: '99999999-9999-4999-8999-999999999999', name: 'Sigsbee', sort_order: 2 },
+];
 
 const locations = [
   {
@@ -732,13 +735,38 @@ test('captures core user and admin screens', async ({ page }, testInfo) => {
   await expect(page.getByRole('status').filter({ hasText: 'Location added: Unsaved map form location.' })).toBeVisible();
   await expect(page.getByLabel('New location name')).toHaveValue('');
   await expect(page.getByLabel('Area for new location')).toHaveValue('');
-  const savedLocation = page.getByLabel(`Location name for ${locations[0].name}`).locator('..');
+  const locationAreaPatch = page.waitForRequest((request) => {
+    if (request.method() !== 'PATCH' || !request.url().endsWith(`/api/admin/locations/${locations[0].id}`)) return false;
+    return request.postDataJSON().area_id === areas[1].id;
+  });
+  await page.getByLabel(`Area assignment for ${locations[0].name}`).selectOption(areas[1].id);
+  await locationAreaPatch;
+  const locationRadiusPatch = page.waitForRequest((request) => {
+    if (request.method() !== 'PATCH' || !request.url().endsWith(`/api/admin/locations/${locations[0].id}`)) return false;
+    return request.postDataJSON().radius_meters === 150;
+  });
+  await page.getByLabel(`Check-in radius in meters for ${locations[0].name}`).fill('150');
+  await page.getByLabel(`Check-in radius in meters for ${locations[0].name}`).blur();
+  await locationRadiusPatch;
+  const savedLocation = page.getByLabel(`Location name for ${locations[0].name}`).locator('xpath=ancestor::article');
   page.once('dialog', (dialog) => dialog.accept());
   await savedLocation.getByRole('button', { name: 'Delete' }).click();
   await expect(page.getByRole('status').filter({ hasText: `Location deleted: ${locations[0].name}.` })).toBeVisible();
   await page.getByRole('button', { name: /Commands \(/ }).click();
   await expect(page.getByRole('heading', { name: /Commands \(/ })).toBeVisible();
-  const savedCommand = page.getByLabel(`Unit name for ${units[0].name}`).locator('..').locator('..');
+  const commandTypePatch = page.waitForRequest((request) => {
+    if (request.method() !== 'PATCH' || !request.url().endsWith(`/api/admin/units/${units[0].id}`)) return false;
+    return request.postDataJSON().unit_type === 'tenant';
+  });
+  await page.getByLabel(`Command type for ${units[0].name}`).selectOption('tenant');
+  await commandTypePatch;
+  const commandLocationPatch = page.waitForRequest((request) => {
+    if (request.method() !== 'PATCH' || !request.url().endsWith(`/api/admin/units/${units[0].id}`)) return false;
+    return request.postDataJSON().location_id === locations[1].id;
+  });
+  await page.getByLabel(`Location assignment for ${units[0].name}`).selectOption(locations[1].id);
+  await commandLocationPatch;
+  const savedCommand = page.getByLabel(`Unit name for ${units[0].name}`).locator('xpath=ancestor::article');
   page.once('dialog', (dialog) => dialog.accept());
   await savedCommand.getByRole('button', { name: 'Delete' }).click();
   await expect(page.getByRole('status').filter({ hasText: `Command deleted: ${units[0].name}.` })).toBeVisible();
