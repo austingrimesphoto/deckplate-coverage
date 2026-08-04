@@ -723,7 +723,7 @@ test('captures core user and admin screens', async ({ page }, testInfo) => {
   await expect(page.getByLabel('New location name')).toHaveValue('Unsaved map form location');
   await page.getByRole('button', { name: 'Review location' }).click();
   await locationDialog.getByRole('button', { name: 'OK, add location' }).click();
-  await expect(page.getByRole('status')).toContainText('Location added: Unsaved map form location.');
+  await expect(page.getByRole('status').filter({ hasText: 'Location added: Unsaved map form location.' })).toBeVisible();
   await expect(page.getByLabel('New location name')).toHaveValue('');
   await expect(page.getByLabel('Area for new location')).toHaveValue('');
   await page.getByRole('button', { name: 'Lock Admin' }).click();
