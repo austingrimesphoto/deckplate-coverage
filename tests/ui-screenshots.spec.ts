@@ -592,7 +592,7 @@ test('honors reduced motion and mobile touch target minimums', async ({ page }, 
   await page.getByLabel('4-digit PIN').fill('2468');
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page.getByRole('heading', { name: 'CH Doe' })).toBeVisible();
-  const motion = await page.locator('.mission-brief').evaluate((element) => {
+  const motion = await page.locator('.checkin-brief').evaluate((element) => {
     const style = getComputedStyle(element);
     return { animationName: style.animationName, transitionDuration: style.transitionDuration, transform: style.transform };
   });
@@ -715,6 +715,17 @@ test('captures core user and admin screens', async ({ page }, testInfo) => {
   await expect(page.getByLabel('New location name')).toHaveValue('Unsaved map form location');
   await expect(page.getByLabel('Area for new location')).toHaveValue(areas[0].id);
   await expect(page.getByRole('slider')).toHaveValue('333');
+  await page.getByRole('button', { name: 'Review location' }).click();
+  const locationDialog = page.getByRole('dialog', { name: 'Add this location?' });
+  await expect(locationDialog).toContainText('Unsaved map form location');
+  await expect(locationDialog).toContainText('Waterfront');
+  await locationDialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByLabel('New location name')).toHaveValue('Unsaved map form location');
+  await page.getByRole('button', { name: 'Review location' }).click();
+  await locationDialog.getByRole('button', { name: 'OK, add location' }).click();
+  await expect(page.getByRole('status')).toContainText('Location added: Unsaved map form location.');
+  await expect(page.getByLabel('New location name')).toHaveValue('');
+  await expect(page.getByLabel('Area for new location')).toHaveValue('');
   await page.getByRole('button', { name: 'Lock Admin' }).click();
   await expect(page.getByRole('button', { name: 'Unlock' })).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem('deckplate.admin'))).toBeNull();

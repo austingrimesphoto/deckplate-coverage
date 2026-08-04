@@ -138,11 +138,13 @@ export const deckplateBriefs: DeckplateBrief[] = [
 ];
 
 export function briefForDate(teamMemberId: string, date = new Date()) {
-  const localDate = `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
-  const seed = `${teamMemberId}:${localDate}`;
+  // Advance through the collection every five minutes so a brief does not stay
+  // fixed for an entire day, while still producing the same sequence per user.
+  const rotation = Math.floor(date.getTime() / (5 * 60 * 1000));
+  const seed = teamMemberId;
   let hash = 0;
   for (let i = 0; i < seed.length; i += 1) {
     hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
   }
-  return deckplateBriefs[hash % deckplateBriefs.length];
+  return deckplateBriefs[(hash + rotation) % deckplateBriefs.length];
 }
